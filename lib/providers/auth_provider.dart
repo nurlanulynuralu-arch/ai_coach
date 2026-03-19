@@ -101,6 +101,43 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> signInWithGoogle({
+    Map<String, dynamic>? onboardingData,
+  }) async {
+    _setLoading(true);
+    _errorMessage = null;
+
+    try {
+      final profile = await _repository.signInWithGoogle(
+        onboardingData: onboardingData,
+      );
+      _firebaseUser = _repository.currentUser;
+      _user = profile.copyWith(
+        emailVerified: _firebaseUser?.emailVerified ?? profile.emailVerified,
+      );
+      _isInitialized = true;
+      notifyListeners();
+      return true;
+    } on GoogleSignInCancelledException {
+      _errorMessage = null;
+      return false;
+    } on FirebaseAuthException catch (error) {
+      _errorMessage = _authMessage(error);
+      return false;
+    } on FirebaseException catch (error) {
+      _errorMessage = error.message ?? 'Could not load your Google account data.';
+      return false;
+    } on UnsupportedError catch (error) {
+      _errorMessage = error.message ?? 'Google sign-in is not supported on this platform.';
+      return false;
+    } catch (_) {
+      _errorMessage = 'Google sign-in failed. Enable Google in Firebase Authentication and try again.';
+      return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> signOut() async {
     await _repository.signOut();
     _errorMessage = null;
@@ -191,6 +228,7 @@ class AuthProvider extends ChangeNotifier {
         firebaseUser: firebaseUser,
         preferredFullName: firebaseUser.displayName,
         preferredEmail: firebaseUser.email,
+        preferredAvatarUrl: firebaseUser.photoURL,
       )
           .timeout(const Duration(seconds: 8));
     } catch (_) {
@@ -272,6 +310,11 @@ class AuthProvider extends ChangeNotifier {
       return 'Firebase Authentication is not fully configured. Open Firebase Console and enable Email/Password sign-in.';
     }
 
+    if (rawMessage.contains('sign_in_failed') ||
+        rawMessage.contains('google') && rawMessage.contains('sign in')) {
+      return 'Google sign-in is not fully configured. Enable Google in Firebase Authentication, add SHA-1/SHA-256 for Android, then download an updated google-services.json.';
+    }
+
     if (rawMessage.contains('api key not valid')) {
       return 'Firebase API key is invalid. Check your google-services.json or firebase_options.dart configuration.';
     }
@@ -293,6 +336,8 @@ class AuthProvider extends ChangeNotifier {
       case 'operation-not-allowed':
       case 'configuration-not-found':
         return 'Email/Password sign-in is disabled in Firebase Console. Enable it in Authentication.';
+      case 'account-exists-with-different-credential':
+        return 'This email is already linked to another sign-in method. Try logging in with the original provider first.';
       case 'email-already-in-use':
         return 'This email is already linked to another account.';
       case 'weak-password':

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/exam.dart';
+import '../../models/study_task.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/quiz_provider.dart';
 import '../../providers/study_plan_provider.dart';
@@ -44,6 +45,7 @@ class HomeScreen extends StatelessWidget {
     final exam = studyProvider.activeExam;
     final progress = studyProvider.progressStats;
     final todayTasks = studyProvider.todayTasks;
+    final nextTask = studyProvider.nextPendingTask;
 
     return Scaffold(
       body: GradientBackground(
@@ -124,7 +126,7 @@ class HomeScreen extends StatelessWidget {
                       ],
                       _HeroExamCard(
                         hasExam: exam != null,
-                        examTitle: exam?.title ?? 'Create your first exam workspace',
+                        examTitle: exam == null ? 'Create your first exam workspace' : _displayExamTitle(exam),
                         subtitle: exam == null
                             ? 'Build a personalized study plan from your exam date, target score, and topics.'
                             : '${exam.subject} | ${exam.examType} | ${exam.studyLevel} | ${DateFormat('MMM d, yyyy').format(exam.examDate)}',
@@ -138,6 +140,14 @@ class HomeScreen extends StatelessWidget {
                             ? context.go('/sign-up')
                             : _startQuiz(context, studyProvider),
                       ),
+                      if (exam != null && nextTask != null) ...[
+                        const SizedBox(height: 16),
+                        _ResumeStudyCard(
+                          task: nextTask,
+                          onContinue: () => context.go('/study-plan'),
+                          onOpenQuiz: () => _startQuiz(context, studyProvider),
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       SectionHeader(
                         title: 'Your exams',
@@ -156,35 +166,48 @@ class HomeScreen extends StatelessWidget {
                           icon: Icons.school_outlined,
                         )
                       else
-                        SizedBox(
-                          height: 172,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: studyProvider.exams.length,
-                            separatorBuilder: (_, itemIndex) => const SizedBox(width: 12),
-                            itemBuilder: (context, index) {
-                              final item = studyProvider.exams[index];
-                              final isActive = item.id == studyProvider.activeExam?.id;
-                              final examTasks = studyProvider.tasksForExam(item.id);
-                              final completedTasks =
-                                  examTasks.where((task) => task.isCompleted).length;
-                              return SizedBox(
-                                width: 250,
-                                child: _ExamWorkspaceCard(
-                                  exam: item,
-                                  isActive: isActive,
-                                  completedTasks: completedTasks,
-                                  totalTasks: examTasks.length,
-                                  onTap: () => studyProvider.setActiveExam(item.id),
-                                  onEdit: () {
-                                    studyProvider.setActiveExam(item.id);
-                                    context.go('/exam-setup');
-                                  },
-                                  onDelete: () => _confirmDeleteExam(context, studyProvider, item.id),
-                                ),
-                              );
-                            },
-                          ),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final textScale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.35);
+                            final extraHeight = (textScale - 1.0) * 56;
+                            final examCardHeight = constraints.maxWidth < 380
+                                ? 254.0 + extraHeight
+                                : constraints.maxWidth < 460
+                                    ? 228.0 + extraHeight
+                                    : 204.0 + extraHeight;
+                            final examCardWidth =
+                                constraints.maxWidth < 390 ? constraints.maxWidth * 0.84 : 250.0;
+                            return SizedBox(
+                              height: examCardHeight,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: studyProvider.exams.length,
+                                separatorBuilder: (_, itemIndex) => const SizedBox(width: 12),
+                                itemBuilder: (context, index) {
+                                  final item = studyProvider.exams[index];
+                                  final isActive = item.id == studyProvider.activeExam?.id;
+                                  final examTasks = studyProvider.tasksForExam(item.id);
+                                  final completedTasks =
+                                      examTasks.where((task) => task.isCompleted).length;
+                                  return SizedBox(
+                                    width: examCardWidth,
+                                    child: _ExamWorkspaceCard(
+                                      exam: item,
+                                      isActive: isActive,
+                                      completedTasks: completedTasks,
+                                      totalTasks: examTasks.length,
+                                      onTap: () => studyProvider.setActiveExam(item.id),
+                                      onEdit: () {
+                                        studyProvider.setActiveExam(item.id);
+                                        context.go('/exam-setup');
+                                      },
+                                      onDelete: () => _confirmDeleteExam(context, studyProvider, item.id),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
                         ),
                       const SizedBox(height: 24),
                       const SectionHeader(
@@ -199,18 +222,12 @@ class HomeScreen extends StatelessWidget {
                           final itemWidth = useSingleColumn
                               ? constraints.maxWidth
                               : (constraints.maxWidth - spacing) / 2;
-                          final cardHeight = useSingleColumn
-                              ? 168.0
-                              : constraints.maxWidth < 420
-                                  ? 204.0
-                                  : 178.0;
                           return Wrap(
                             spacing: spacing,
                             runSpacing: spacing,
                             children: [
                               SizedBox(
                                 width: itemWidth,
-                                height: cardHeight,
                                 child: QuickActionCard(
                                   icon: Icons.add_task_rounded,
                                   title: 'Create Exam',
@@ -221,7 +238,6 @@ class HomeScreen extends StatelessWidget {
                               ),
                               SizedBox(
                                 width: itemWidth,
-                                height: cardHeight,
                                 child: QuickActionCard(
                                   icon: Icons.calendar_month_rounded,
                                   title: 'Study Plan',
@@ -234,7 +250,6 @@ class HomeScreen extends StatelessWidget {
                               ),
                               SizedBox(
                                 width: itemWidth,
-                                height: cardHeight,
                                 child: QuickActionCard(
                                   icon: Icons.quiz_rounded,
                                   title: 'Quizzes',
@@ -245,7 +260,6 @@ class HomeScreen extends StatelessWidget {
                               ),
                               SizedBox(
                                 width: itemWidth,
-                                height: cardHeight,
                                 child: QuickActionCard(
                                   icon: Icons.layers_rounded,
                                   title: 'Flashcards',
@@ -560,6 +574,26 @@ class _HeroExamCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final quizButton = FilledButton.icon(
+      onPressed: hasExam ? onSecondaryTap : onPrimaryTap,
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: AppTheme.deepBlue,
+      ),
+      icon: Icon(hasExam ? Icons.quiz_rounded : Icons.add_task_rounded),
+      label: Text(hasExam ? 'Open quiz' : 'Create exam'),
+    );
+    final secondaryButton = OutlinedButton.icon(
+      onPressed: hasExam ? onPrimaryTap : onSecondaryTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+      ),
+      icon: Icon(hasExam ? Icons.menu_book_rounded : Icons.login_rounded),
+      label: Text(hasExam ? 'Open study plan' : 'Open sign in'),
+    );
+
     return AppCard(
       gradient: const LinearGradient(
         begin: Alignment.topLeft,
@@ -620,22 +654,110 @@ class _HeroExamCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           AdaptiveButtonRow(
-            first: OutlinedButton(
-              onPressed: onSecondaryTap,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
-                backgroundColor: Colors.white.withValues(alpha: 0.08),
+            first: quizButton,
+            second: secondaryButton,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResumeStudyCard extends StatelessWidget {
+  const _ResumeStudyCard({
+    required this.task,
+    required this.onContinue,
+    required this.onOpenQuiz,
+  });
+
+  final StudyTask task;
+  final VoidCallback onContinue;
+  final VoidCallback onOpenQuiz;
+
+  @override
+  Widget build(BuildContext context) {
+    final dueLabel = _dueLabelForTask(task);
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.greenSoft,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'Resume study',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.mint,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
               ),
-              child: Text(hasExam ? 'Take quiz' : 'See onboarding'),
+              const Spacer(),
+              Text(
+                dueLabel,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.primaryBlue,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            task.title,
+            style: Theme.of(context).textTheme.titleLarge,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            task.description,
+            style: Theme.of(context).textTheme.bodyMedium,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _ResumeMetaChip(
+                icon: Icons.menu_book_rounded,
+                label: task.topicTitle,
+                color: AppTheme.primaryBlue,
+                backgroundColor: AppTheme.blueSoft,
+              ),
+              _ResumeMetaChip(
+                icon: Icons.schedule_rounded,
+                label: '${task.estimatedMinutes} min',
+                color: AppTheme.mint,
+                backgroundColor: AppTheme.greenSoft,
+              ),
+              _ResumeMetaChip(
+                icon: Icons.auto_awesome_rounded,
+                label: _displayTaskType(task.taskType),
+                color: AppTheme.deepBlue,
+                backgroundColor: AppTheme.softSurface,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          AdaptiveButtonRow(
+            first: FilledButton.icon(
+              onPressed: onContinue,
+              icon: const Icon(Icons.play_circle_fill_rounded),
+              label: const Text('Continue task'),
             ),
-            second: FilledButton(
-              onPressed: onPrimaryTap,
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: AppTheme.deepBlue,
-              ),
-              child: Text(hasExam ? 'Open study plan' : 'Create exam'),
+            second: OutlinedButton.icon(
+              onPressed: onOpenQuiz,
+              icon: const Icon(Icons.quiz_rounded),
+              label: const Text('Open quiz'),
             ),
           ),
         ],
@@ -697,8 +819,18 @@ class _ExamWorkspaceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = _isCompactCardLayout(context);
+    final displayTitle = _displayExamTitle(exam);
+    final subtitle = _displayExamMeta(exam);
+
     return AppCard(
       onTap: onTap,
+      padding: EdgeInsets.fromLTRB(
+        compact ? 14 : 20,
+        compact ? 14 : 20,
+        compact ? 14 : 20,
+        compact ? 12 : 20,
+      ),
       gradient: isActive
           ? const LinearGradient(
               begin: Alignment.topLeft,
@@ -724,10 +856,13 @@ class _ExamWorkspaceCard extends StatelessWidget {
                           color: AppTheme.primaryBlue,
                           fontWeight: FontWeight.w800,
                         ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
               PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
                 onSelected: (value) {
                   if (value == 'edit') {
                     onEdit();
@@ -749,37 +884,91 @@ class _ExamWorkspaceCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: compact ? 10 : 16),
           Text(
-            exam.title,
-            style: Theme.of(context).textTheme.titleLarge,
+            displayTitle,
+            style: (compact ? Theme.of(context).textTheme.titleSmall : Theme.of(context).textTheme.titleLarge)
+                ?.copyWith(color: AppTheme.ink),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: compact ? 4 : 8),
           Text(
-            '${exam.examType} | ${DateFormat('MMM d, yyyy').format(exam.examDate)}',
-            style: Theme.of(context).textTheme.bodyMedium,
+            subtitle,
+            style: compact ? Theme.of(context).textTheme.bodySmall : Theme.of(context).textTheme.bodyMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          const Spacer(),
-          Text(
-            '$completedTasks/$totalTasks tasks complete',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppTheme.ink,
-                ),
-          ),
-          const SizedBox(height: 8),
+          SizedBox(height: compact ? 12 : 18),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: totalTasks == 0 ? 0 : completedTasks / totalTasks,
-              minHeight: 8,
+              minHeight: compact ? 6 : 8,
             ),
+          ),
+          SizedBox(height: compact ? 8 : 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                '$completedTasks/$totalTasks complete',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.ink,
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (isActive)
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 5 : 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.greenSoft,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'Active',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.mint,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
     );
   }
+
+  bool _isCompactCardLayout(BuildContext context) {
+    return MediaQuery.sizeOf(context).width < 390;
+  }
+}
+
+String _displayExamTitle(Exam exam) {
+  final trimmedTitle = exam.title.trim();
+  final normalizedTitle = trimmedTitle.toLowerCase();
+  const genericTitles = <String>{
+    'quiz',
+    'exam',
+    'test',
+    'study plan',
+    'plan',
+  };
+
+  if (trimmedTitle.isEmpty || genericTitles.contains(normalizedTitle)) {
+    return '${exam.subject} focus plan';
+  }
+
+  return trimmedTitle;
+}
+
+String _displayExamMeta(Exam exam) {
+  final formattedDate = DateFormat('MMM d, yyyy').format(exam.examDate);
+  return '${exam.examType} | $formattedDate';
 }
 
 class _MetricPill extends StatelessWidget {
@@ -809,5 +998,80 @@ class _MetricPill extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _ResumeMetaChip extends StatelessWidget {
+  const _ResumeMetaChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.backgroundColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _dueLabelForTask(StudyTask task) {
+  final today = DateTime.now();
+  final normalizedToday = DateTime(today.year, today.month, today.day);
+  final normalizedTaskDate = DateTime(task.scheduledFor.year, task.scheduledFor.month, task.scheduledFor.day);
+
+  if (normalizedTaskDate == normalizedToday) {
+    return 'Due today';
+  }
+  if (normalizedTaskDate.isBefore(normalizedToday)) {
+    return 'Overdue';
+  }
+  return 'Up next';
+}
+
+String _displayTaskType(String taskType) {
+  switch (taskType.toLowerCase()) {
+    case 'study':
+      return 'Study';
+    case 'recall':
+      return 'Recall';
+    case 'quiz':
+      return 'Quiz';
+    case 'flashcards':
+      return 'Flashcards';
+    case 'review':
+      return 'Review';
+    default:
+      return taskType;
   }
 }

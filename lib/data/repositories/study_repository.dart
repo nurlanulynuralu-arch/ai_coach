@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../models/exam.dart';
@@ -9,6 +11,7 @@ class StudyRepository {
   StudyRepository({FirebaseFirestore? firestore}) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+  static const int _batchChunkSize = 400;
 
   Stream<List<Exam>> watchExams(String userId) {
     return _firestore
@@ -71,18 +74,23 @@ class StudyRepository {
     required List<StudyTask> tasks,
     required List<Flashcard> flashcards,
   }) async {
-    final batch = _firestore.batch();
-    batch.set(_firestore.collection('exams').doc(exam.id), exam.toMap());
-
-    for (final task in tasks) {
-      batch.set(_firestore.collection('study_tasks').doc(task.id), task.toMap());
-    }
-
-    for (final flashcard in flashcards) {
-      batch.set(_firestore.collection('flashcards').doc(flashcard.id), flashcard.toMap());
-    }
-
-    await batch.commit();
+    await _commitChunked(
+      <void Function(WriteBatch)>[
+        (batch) => batch.set(_firestore.collection('exams').doc(exam.id), exam.toMap()),
+        ...tasks.map(
+          (task) => (WriteBatch batch) => batch.set(
+                _firestore.collection('study_tasks').doc(task.id),
+                task.toMap(),
+              ),
+        ),
+        ...flashcards.map(
+          (flashcard) => (WriteBatch batch) => batch.set(
+                _firestore.collection('flashcards').doc(flashcard.id),
+                flashcard.toMap(),
+              ),
+        ),
+      ],
+    );
   }
 
   Future<void> updateExam(Exam exam) async {
@@ -97,17 +105,17 @@ class StudyRepository {
     required List<StudyTask> tasks,
   }) async {
     final existing = await _firestore.collection('study_tasks').where('examId', isEqualTo: examId).get();
-    final batch = _firestore.batch();
-
-    for (final doc in existing.docs) {
-      batch.delete(doc.reference);
-    }
-
-    for (final task in tasks) {
-      batch.set(_firestore.collection('study_tasks').doc(task.id), task.toMap());
-    }
-
-    await batch.commit();
+    await _commitChunked(
+      <void Function(WriteBatch)>[
+        ...existing.docs.map((doc) => (WriteBatch batch) => batch.delete(doc.reference)),
+        ...tasks.map(
+          (task) => (WriteBatch batch) => batch.set(
+                _firestore.collection('study_tasks').doc(task.id),
+                task.toMap(),
+              ),
+        ),
+      ],
+    );
   }
 
   Future<void> replaceFlashcardsForExam({
@@ -115,17 +123,17 @@ class StudyRepository {
     required List<Flashcard> flashcards,
   }) async {
     final existing = await _firestore.collection('flashcards').where('examId', isEqualTo: examId).get();
-    final batch = _firestore.batch();
-
-    for (final doc in existing.docs) {
-      batch.delete(doc.reference);
-    }
-
-    for (final flashcard in flashcards) {
-      batch.set(_firestore.collection('flashcards').doc(flashcard.id), flashcard.toMap());
-    }
-
-    await batch.commit();
+    await _commitChunked(
+      <void Function(WriteBatch)>[
+        ...existing.docs.map((doc) => (WriteBatch batch) => batch.delete(doc.reference)),
+        ...flashcards.map(
+          (flashcard) => (WriteBatch batch) => batch.set(
+                _firestore.collection('flashcards').doc(flashcard.id),
+                flashcard.toMap(),
+              ),
+        ),
+      ],
+    );
   }
 
   Future<void> updateTask(StudyTask task) {
@@ -158,22 +166,28 @@ class StudyRepository {
     final tasksSnapshot = await _firestore.collection('study_tasks').where('examId', isEqualTo: examId).get();
     final flashcardsSnapshot = await _firestore.collection('flashcards').where('examId', isEqualTo: examId).get();
     final attemptsSnapshot = await _firestore.collection('quiz_attempts').where('examId', isEqualTo: examId).get();
+    await _commitChunked(
+      <void Function(WriteBatch)>[
+        (batch) => batch.delete(_firestore.collection('exams').doc(examId)),
+        ...tasksSnapshot.docs.map((doc) => (WriteBatch batch) => batch.delete(doc.reference)),
+        ...flashcardsSnapshot.docs.map((doc) => (WriteBatch batch) => batch.delete(doc.reference)),
+        ...attemptsSnapshot.docs.map((doc) => (WriteBatch batch) => batch.delete(doc.reference)),
+      ],
+    );
+  }
 
-    final batch = _firestore.batch();
-    batch.delete(_firestore.collection('exams').doc(examId));
-
-    for (final doc in tasksSnapshot.docs) {
-      batch.delete(doc.reference);
+  Future<void> _commitChunked(List<void Function(WriteBatch)> operations) async {
+    if (operations.isEmpty) {
+      return;
     }
 
-    for (final doc in flashcardsSnapshot.docs) {
-      batch.delete(doc.reference);
+    for (var start = 0; start < operations.length; start += _batchChunkSize) {
+      final batch = _firestore.batch();
+      final end = math.min(start + _batchChunkSize, operations.length);
+      for (final operation in operations.sublist(start, end)) {
+        operation(batch);
+      }
+      await batch.commit();
     }
-
-    for (final doc in attemptsSnapshot.docs) {
-      batch.delete(doc.reference);
-    }
-
-    await batch.commit();
   }
 }

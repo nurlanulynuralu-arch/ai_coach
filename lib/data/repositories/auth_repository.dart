@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../models/app_user.dart';
@@ -8,11 +10,14 @@ class AuthRepository {
   AuthRepository({
     FirebaseAuth? auth,
     FirebaseFirestore? firestore,
+    GoogleSignIn? googleSignIn,
   })  : _auth = auth ?? FirebaseAuth.instance,
-        _firestore = firestore ?? FirebaseFirestore.instance;
+        _firestore = firestore ?? FirebaseFirestore.instance,
+        _googleSignIn = googleSignIn ?? GoogleSignIn(scopes: const ['email']);
 
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
+  final GoogleSignIn _googleSignIn;
 
   Stream<User?> authStateChanges() => _auth.authStateChanges();
 
@@ -71,10 +76,51 @@ class AuthRepository {
       firebaseUser: firebaseUser,
       preferredFullName: firebaseUser.displayName ?? 'Student',
       preferredEmail: firebaseUser.email ?? email,
+      preferredAvatarUrl: firebaseUser.photoURL,
     );
   }
 
-  Future<void> signOut() => _auth.signOut();
+  Future<AppUser> signInWithGoogle({
+    Map<String, dynamic>? onboardingData,
+  }) async {
+    UserCredential credential;
+
+    if (kIsWeb) {
+      credential = await _auth.signInWithPopup(GoogleAuthProvider());
+    } else {
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        throw const GoogleSignInCancelledException();
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final authCredential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      credential = await _auth.signInWithCredential(authCredential);
+    }
+
+    final firebaseUser = credential.user!;
+    return ensureUserProfile(
+      firebaseUser: firebaseUser,
+      preferredFullName: firebaseUser.displayName ?? 'Student',
+      preferredEmail: firebaseUser.email ?? '',
+      preferredAvatarUrl: firebaseUser.photoURL,
+      onboardingData: onboardingData,
+    );
+  }
+
+  Future<void> signOut() async {
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {
+      // Ignore local Google sign-out errors and still clear Firebase session.
+    }
+
+    await _auth.signOut();
+  }
 
   Future<void> sendPasswordReset(String email) {
     return _auth.sendPasswordResetEmail(email: email);
@@ -132,6 +178,7 @@ class AuthRepository {
     required User firebaseUser,
     String? preferredFullName,
     String? preferredEmail,
+    String? preferredAvatarUrl,
     Map<String, dynamic>? onboardingData,
   }) async {
     final existingProfile = await fetchUserProfile(firebaseUser.uid);
@@ -144,6 +191,7 @@ class AuthRepository {
         email: existingProfile.email.isEmpty
             ? (preferredEmail ?? firebaseUser.email ?? '')
             : existingProfile.email,
+        avatarUrl: existingProfile.avatarUrl ?? preferredAvatarUrl,
         emailVerified: firebaseUser.emailVerified,
       );
 
@@ -160,7 +208,7 @@ class AuthRepository {
       uid: firebaseUser.uid,
       fullName: fallbackName,
       email: preferredEmail ?? firebaseUser.email ?? '',
-      avatarUrl: null,
+      avatarUrl: preferredAvatarUrl,
       avatarPlaceholder: _initialsFromName(fallbackName),
       createdAt: DateTime.now(),
       emailVerified: firebaseUser.emailVerified,
@@ -205,4 +253,8 @@ String _initialsFromName(String fullName) {
   }
 
   return parts.map((part) => part[0].toUpperCase()).join();
+}
+
+class GoogleSignInCancelledException implements Exception {
+  const GoogleSignInCancelledException();
 }

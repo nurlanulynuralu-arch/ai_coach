@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/google_sign_in_button.dart';
 import '../../widgets/gradient_background.dart';
 import '../../widgets/primary_button.dart';
 
@@ -81,6 +82,26 @@ class _SignUpScreenState extends State<SignUpScreen> {
         _selectedSubjects.add(subject);
       }
     });
+  }
+
+  Future<void> _continueWithGoogle() async {
+    final authProvider = context.read<AuthProvider>();
+    final success = await authProvider.signInWithGoogle(
+      onboardingData: {
+        'selectedSubjects': _selectedSubjects,
+        'dailyGoalMinutes': _dailyGoalMinutes,
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!success && authProvider.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authProvider.errorMessage!)),
+      );
+    }
   }
 
   @override
@@ -241,6 +262,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           icon: Icons.arrow_forward_rounded,
                           isLoading: authProvider.isLoading,
                           onPressed: _submit,
+                        ),
+                        const SizedBox(height: 12),
+                        GoogleSignInButton(
+                          label: 'Sign up with Google',
+                          isLoading: authProvider.isLoading,
+                          onPressed: _continueWithGoogle,
                         ),
                       ],
                     ),

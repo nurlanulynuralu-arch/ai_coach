@@ -25,6 +25,7 @@ class QuickActionCard extends StatelessWidget {
       onTap: onTap,
       padding: const EdgeInsets.all(18),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -55,7 +56,7 @@ class QuickActionCard extends StatelessWidget {
               ),
             ],
           ),
-          const Spacer(),
+          const SizedBox(height: 24),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -76,6 +77,8 @@ class QuickActionCard extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: AppTheme.ink,
                 ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

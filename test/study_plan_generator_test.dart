@@ -57,4 +57,96 @@ void main() {
       isTrue,
     );
   });
+
+  test('physics content stays subject-specific and avoids biology fallback text', () {
+    final generator = StudyPlanGenerator();
+    final exam = Exam(
+      id: 'exam-physics',
+      userId: 'user-1',
+      title: 'Physics Final',
+      subject: 'Physics',
+      studyLevel: 'B2',
+      examType: 'Final exam',
+      examDate: DateTime.now().add(const Duration(days: 12)),
+      targetScore: 90,
+      difficulty: 'Advanced',
+      topics: const [
+        StudyTopic(
+          id: 'topic-physics-1',
+          title: 'Electric circuits',
+          importance: 3,
+        ),
+      ],
+      weakAreas: const ['Units'],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final explanation = generator.buildTopicExplanation(
+      exam: exam,
+      topic: exam.topics.first,
+    );
+    final example = generator.buildTopicExample(
+      exam: exam,
+      topic: exam.topics.first,
+    );
+    final content = generator.buildPlan(exam: exam);
+
+    expect(explanation.toLowerCase(), contains('physics'));
+    expect(example.toLowerCase(), anyOf(contains('formula'), contains('unit')));
+    expect(
+      content.tasks.any(
+        (task) => task.description.toLowerCase().contains('photosynthesis'),
+      ),
+      isFalse,
+    );
+    expect(
+      content.tasks.any(
+        (task) =>
+            task.description.toLowerCase().contains('equation') ||
+            task.description.toLowerCase().contains('unit'),
+      ),
+      isTrue,
+    );
+  });
+
+  test('topic coach note uses the exact topic and the required A-F structure', () {
+    final generator = StudyPlanGenerator();
+    final exam = Exam(
+      id: 'exam-thermo',
+      userId: 'user-1',
+      title: 'Physics Final',
+      subject: 'Physics',
+      studyLevel: 'B1',
+      examType: 'School exam',
+      examDate: DateTime.now().add(const Duration(days: 7)),
+      targetScore: 88,
+      difficulty: 'Balanced',
+      topics: const [
+        StudyTopic(
+          id: 'topic-thermo',
+          title: 'Physics: Thermodynamics',
+          importance: 3,
+        ),
+      ],
+      weakAreas: const ['Formula selection'],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final note = generator.buildTopicCoachNote(
+      exam: exam,
+      topic: exam.topics.first,
+    );
+
+    expect(note, contains('A) Simple Explanation'));
+    expect(note, contains('B) Key Concepts'));
+    expect(note, contains('C) Important Formulas'));
+    expect(note, contains('D) Real-life Example'));
+    expect(note, contains('E) Quick Quiz'));
+    expect(note, contains('F) Flashcards'));
+    expect(note.toLowerCase(), contains('thermodynamics'));
+    expect(note.toLowerCase(), isNot(contains('photosynthesis')));
+    expect(note, contains('Q = mc x delta T'));
+  });
 }

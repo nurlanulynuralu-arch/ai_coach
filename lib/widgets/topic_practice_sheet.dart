@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../models/topic_search_result.dart';
 import '../models/study_task.dart';
 import '../theme/app_theme.dart';
 import 'adaptive_button_row.dart';
 import 'app_card.dart';
+import 'topic_search_results_panel.dart';
 
 class TopicPracticeSheet extends StatelessWidget {
   const TopicPracticeSheet({
@@ -15,9 +17,13 @@ class TopicPracticeSheet extends StatelessWidget {
     required this.relatedCardCount,
     required this.tasks,
     required this.prompts,
+    required this.internetResults,
+    required this.isLoadingInternetResults,
+    required this.onRefreshInternetResults,
     required this.onToggleTask,
     required this.onStartQuiz,
     required this.onOpenStudyPlan,
+    this.internetErrorMessage,
   });
 
   final String topicTitle;
@@ -26,6 +32,10 @@ class TopicPracticeSheet extends StatelessWidget {
   final int relatedCardCount;
   final List<StudyTask> tasks;
   final List<TopicPracticePrompt> prompts;
+  final List<TopicSearchResult> internetResults;
+  final bool isLoadingInternetResults;
+  final String? internetErrorMessage;
+  final VoidCallback onRefreshInternetResults;
   final ValueChanged<StudyTask> onToggleTask;
   final VoidCallback onStartQuiz;
   final VoidCallback onOpenStudyPlan;
@@ -108,6 +118,14 @@ class TopicPracticeSheet extends StatelessWidget {
                             ),
                           ],
                         ),
+                      ),
+                      const SizedBox(height: 20),
+                      TopicSearchResultsPanel(
+                        topicTitle: topicTitle,
+                        results: internetResults,
+                        isLoading: isLoadingInternetResults,
+                        errorMessage: internetErrorMessage,
+                        onRefresh: onRefreshInternetResults,
                       ),
                       const SizedBox(height: 20),
                       AppCard(

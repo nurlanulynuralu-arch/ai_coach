@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/google_sign_in_button.dart';
 import '../../widgets/gradient_background.dart';
 import '../../widgets/primary_button.dart';
 
@@ -114,6 +115,21 @@ class _SignInScreenState extends State<SignInScreen> {
     controller.dispose();
   }
 
+  Future<void> _continueWithGoogle() async {
+    final authProvider = context.read<AuthProvider>();
+    final success = await authProvider.signInWithGoogle();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!success && authProvider.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authProvider.errorMessage!)),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
@@ -200,6 +216,11 @@ class _SignInScreenState extends State<SignInScreen> {
                           icon: Icons.login_rounded,
                           isLoading: authProvider.isLoading,
                           onPressed: _submit,
+                        ),
+                        const SizedBox(height: 12),
+                        GoogleSignInButton(
+                          isLoading: authProvider.isLoading,
+                          onPressed: _continueWithGoogle,
                         ),
                       ],
                     ),

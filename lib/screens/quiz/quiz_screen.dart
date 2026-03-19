@@ -222,9 +222,9 @@ class _QuizScreenState extends State<QuizScreen> {
     if (scorePercent >= 65) {
       return weakTopics.isEmpty
           ? 'Good progress. A short review round will help lock in your answers.'
-          : 'You are improving, but a few weak areas still need another focused study block.';
+          : 'You are improving, but a few weak areas still need another focused study block. The app will keep these topics in focus.';
     }
-    return 'This quiz showed the topics that need more structure. Review the explanations, then go back through the weak areas slowly.';
+    return 'This quiz showed the topics that need more structure. Review the simpler explanations, then go back through the weak areas slowly.';
   }
 
   String _nextStepFor(int scorePercent, List<String> weakTopics) {
@@ -234,7 +234,7 @@ class _QuizScreenState extends State<QuizScreen> {
     if (weakTopics.isEmpty) {
       return 'Next step: open your flashcards and repeat the hardest prompts once more today.';
     }
-    return 'Next step: revisit ${weakTopics.take(2).join(' and ')} in your study plan, then review the linked flashcards.';
+    return 'Next step: revisit ${weakTopics.take(2).join(' and ')} in your study plan. Recovery review tasks and stronger weak-area focus are now added automatically.';
   }
 }
 

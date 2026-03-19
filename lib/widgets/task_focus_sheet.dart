@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../models/topic_search_result.dart';
 import '../theme/app_theme.dart';
 import 'adaptive_button_row.dart';
 import 'app_card.dart';
+import 'topic_search_results_panel.dart';
 
 class TaskFocusSheet extends StatelessWidget {
   const TaskFocusSheet({
@@ -14,10 +16,14 @@ class TaskFocusSheet extends StatelessWidget {
     required this.minutesLabel,
     required this.relatedFlashcardsLabel,
     required this.steps,
+    required this.internetResults,
+    required this.isLoadingInternetResults,
+    required this.onRefreshInternetResults,
     required this.isCompleted,
     required this.onToggleComplete,
     required this.onOpenFlashcards,
     required this.onStartQuiz,
+    this.internetErrorMessage,
   });
 
   final String title;
@@ -27,6 +33,10 @@ class TaskFocusSheet extends StatelessWidget {
   final String minutesLabel;
   final String relatedFlashcardsLabel;
   final List<String> steps;
+  final List<TopicSearchResult> internetResults;
+  final bool isLoadingInternetResults;
+  final String? internetErrorMessage;
+  final VoidCallback onRefreshInternetResults;
   final bool isCompleted;
   final VoidCallback onToggleComplete;
   final VoidCallback onOpenFlashcards;
@@ -109,6 +119,14 @@ class TaskFocusSheet extends StatelessWidget {
                             ),
                           ],
                         ),
+                      ),
+                      const SizedBox(height: 20),
+                      TopicSearchResultsPanel(
+                        topicTitle: topicTitle,
+                        results: internetResults,
+                        isLoading: isLoadingInternetResults,
+                        errorMessage: internetErrorMessage,
+                        onRefresh: onRefreshInternetResults,
                       ),
                       const SizedBox(height: 20),
                       AppCard(

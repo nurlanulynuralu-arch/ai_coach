@@ -303,6 +303,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   }
 
   Future<void> _openTopicPractice(BuildContext context, Flashcard card) async {
+    context.read<StudyPlanProvider>().loadTopicSearchResults(card.topicTitle);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -323,6 +324,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                 card: card,
                 tasks: topicTasks,
                 summary: summary,
+              ),
+              internetResults: provider.topicSearchResultsFor(card.topicTitle),
+              isLoadingInternetResults: provider.isTopicSearchLoading(card.topicTitle),
+              internetErrorMessage: provider.topicSearchErrorFor(card.topicTitle),
+              onRefreshInternetResults: () => provider.loadTopicSearchResults(
+                card.topicTitle,
+                forceRefresh: true,
               ),
               onToggleTask: (task) => provider.toggleTask(task.id),
               onStartQuiz: () {

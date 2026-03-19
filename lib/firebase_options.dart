@@ -49,11 +49,11 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_ANDROID_API_KEY',
-    appId: '1:000000000000:android:replace-me',
-    messagingSenderId: '000000000000',
-    projectId: 'replace-with-your-project-id',
-    storageBucket: 'replace-with-your-project-id.appspot.com',
+    apiKey: 'AIzaSyDFhArpcKGW7H47y2j-rivX9hiK9AztZQ4',
+    appId: '1:219266157640:android:01729278c7ccff121f9c7d',
+    messagingSenderId: '219266157640',
+    projectId: 'ai-cach',
+    storageBucket: 'ai-cach.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(

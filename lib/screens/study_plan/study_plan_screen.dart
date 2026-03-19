@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/exam.dart';
 import '../../models/study_task.dart';
 import '../../providers/quiz_provider.dart';
 import '../../providers/study_plan_provider.dart';
@@ -103,19 +104,19 @@ class StudyPlanScreen extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  exam.title,
+                                  _displayExamTitle(exam),
                                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                         color: Colors.white,
                                       ),
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  exam.notes?.isNotEmpty == true
-                                      ? exam.notes!
-                                      : 'A structured plan generated from your level, exam type, weak areas, and study topics.',
+                                  _overviewForExam(exam),
                                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                         color: Colors.white.withValues(alpha: 0.84),
                                       ),
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 18),
                                 ClipRRect(
@@ -229,70 +230,13 @@ class StudyPlanScreen extends StatelessWidget {
                             subtitle: 'Each task is editable and synced to Firestore for real progress tracking.',
                           ),
                           const SizedBox(height: 16),
-                          if (provider.tasks.isEmpty)
-                            const EmptyStateView(
-                              title: 'No tasks in this plan',
-                              message: 'Regenerate the plan or add your first custom task.',
-                              icon: Icons.playlist_add_check_circle_outlined,
-                            )
-                          else
-                            ...provider.tasksByDate.entries.map(
-                              (entry) => Padding(
-                                padding: const EdgeInsets.only(bottom: 18),
-                                child: AppCard(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: DateUtils.isSameDay(entry.key, DateTime.now())
-                                                  ? AppTheme.greenSoft
-                                                  : AppTheme.blueSoft,
-                                              borderRadius: BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              DateUtils.isSameDay(entry.key, DateTime.now())
-                                                  ? 'Today'
-                                                  : DateFormat('EEE').format(entry.key),
-                                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                                    color: DateUtils.isSameDay(entry.key, DateTime.now())
-                                                        ? AppTheme.mint
-                                                        : AppTheme.primaryBlue,
-                                                    fontWeight: FontWeight.w800,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            DateFormat('MMMM d').format(entry.key),
-                                            style: Theme.of(context).textTheme.titleMedium,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 16),
-                                      ...entry.value.map(
-                                        (task) => Padding(
-                                          padding: const EdgeInsets.only(bottom: 12),
-                                          child: StudyTaskTile(
-                                            task: task,
-                                            onTap: () => _openTaskFocus(context, task),
-                                            onToggle: () => provider.toggleTask(task.id),
-                                            onEdit: () => _openTaskEditor(context, task: task),
-                                            onDelete: () => _deleteTask(context, task.id),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
+                          _TaskTimelineSection(
+                            tasksByDate: provider.tasksByDate,
+                            onOpenTaskFocus: (task) => _openTaskFocus(context, task),
+                            onToggleTask: (taskId) => provider.toggleTask(taskId),
+                            onEditTask: (task) => _openTaskEditor(context, task: task),
+                            onDeleteTask: (taskId) => _deleteTask(context, taskId),
+                          ),
                           const SizedBox(height: 12),
                           AppCard(
                             child: Column(
@@ -331,6 +275,95 @@ class StudyPlanScreen extends StatelessWidget {
     );
   }
 
+  String _displayExamTitle(Exam exam) {
+    final trimmedTitle = exam.title.trim();
+    final normalizedTitle = trimmedTitle.toLowerCase();
+    const genericTitles = <String>{
+      'quiz',
+      'exam',
+      'test',
+      'study plan',
+      'plan',
+    };
+
+    if (trimmedTitle.isEmpty || genericTitles.contains(normalizedTitle)) {
+      return '${exam.subject} focus plan';
+    }
+
+    return trimmedTitle;
+  }
+
+  String _overviewForExam(Exam exam) {
+    final notePreview = _cleanNotePreview(exam.notes);
+    if (notePreview != null) {
+      return notePreview;
+    }
+
+    final topicTitles = exam.topics.take(3).map((topic) => topic.title).toList();
+    final topicSummary = switch (topicTitles.length) {
+      0 => 'your next study goals',
+      1 => topicTitles.first,
+      2 => '${topicTitles[0]} and ${topicTitles[1]}',
+      _ => '${topicTitles[0]}, ${topicTitles[1]}, and ${topicTitles[2]}',
+    };
+
+    if (exam.weakAreas.isNotEmpty) {
+      final weakAreas = exam.weakAreas.take(2).join(' and ');
+      return 'Focus on $topicSummary with extra support for $weakAreas. The plan below breaks study into clear daily steps.';
+    }
+
+    return 'Focus on $topicSummary. The plan below spreads study, practice, and review into manageable daily steps.';
+  }
+
+  String? _cleanNotePreview(String? notes) {
+    if (notes == null || notes.trim().isEmpty) {
+      return null;
+    }
+
+    final normalized = notes
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final lower = normalized.toLowerCase();
+    const technicalMarkers = <String>[
+      'build configuration',
+      'display identification data',
+      'wide-color information',
+      'sync configuration',
+      'frame rate overrides',
+      'layehistory',
+      'layerhistory',
+      'present_time_offset',
+      'egl_',
+      'color mode',
+      'scheduler:',
+    ];
+
+    final looksTechnical = technicalMarkers.any(lower.contains) ||
+        RegExp(r'[A-Z0-9_]{8,}').hasMatch(normalized);
+    if (looksTechnical) {
+      return null;
+    }
+
+    final parts = normalized
+        .split(RegExp(r'(?<=[.!?])\s+|\n+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .toList();
+    if (parts.isEmpty) {
+      return null;
+    }
+
+    final preview = parts.join(' ');
+    if (preview.length <= 180) {
+      return preview;
+    }
+
+    return '${preview.substring(0, 177).trimRight()}...';
+  }
+
   Future<void> _deleteTask(BuildContext context, String taskId) async {
     final confirmed = await showDialog<bool>(
           context: context,
@@ -361,6 +394,7 @@ class StudyPlanScreen extends StatelessWidget {
   }
 
   Future<void> _openTaskFocus(BuildContext context, StudyTask task) async {
+    context.read<StudyPlanProvider>().loadTopicSearchResults(task.topicTitle);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -380,6 +414,13 @@ class StudyPlanScreen extends StatelessWidget {
               minutesLabel: '${task.estimatedMinutes} min block',
               relatedFlashcardsLabel: '$relatedFlashcards flashcards',
               steps: _buildTaskSteps(task: task, summary: summary),
+              internetResults: provider.topicSearchResultsFor(task.topicTitle),
+              isLoadingInternetResults: provider.isTopicSearchLoading(task.topicTitle),
+              internetErrorMessage: provider.topicSearchErrorFor(task.topicTitle),
+              onRefreshInternetResults: () => provider.loadTopicSearchResults(
+                task.topicTitle,
+                forceRefresh: true,
+              ),
               isCompleted: task.isCompleted,
               onToggleComplete: () async {
                 await provider.toggleTask(task.id);
@@ -645,6 +686,206 @@ class StudyPlanScreen extends StatelessWidget {
     descriptionController.dispose();
     topicController.dispose();
     minutesController.dispose();
+  }
+}
+
+enum _TaskFilterMode {
+  all,
+  today,
+  pending,
+  completed,
+}
+
+class _TaskTimelineSection extends StatefulWidget {
+  const _TaskTimelineSection({
+    required this.tasksByDate,
+    required this.onOpenTaskFocus,
+    required this.onToggleTask,
+    required this.onEditTask,
+    required this.onDeleteTask,
+  });
+
+  final Map<DateTime, List<StudyTask>> tasksByDate;
+  final Future<void> Function(StudyTask task) onOpenTaskFocus;
+  final Future<void> Function(String taskId) onToggleTask;
+  final Future<void> Function(StudyTask task) onEditTask;
+  final Future<void> Function(String taskId) onDeleteTask;
+
+  @override
+  State<_TaskTimelineSection> createState() => _TaskTimelineSectionState();
+}
+
+class _TaskTimelineSectionState extends State<_TaskTimelineSection> {
+  _TaskFilterMode _filterMode = _TaskFilterMode.all;
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredGroups = _filteredTaskGroups();
+    final filteredCount = filteredGroups.values.fold<int>(
+      0,
+      (count, tasks) => count + tasks.length,
+    );
+    final hasAnyTasks = widget.tasksByDate.values.any((tasks) => tasks.isNotEmpty);
+
+    if (!hasAnyTasks) {
+      return const EmptyStateView(
+        title: 'No tasks in this plan',
+        message: 'Regenerate the plan or add your first custom task.',
+        icon: Icons.playlist_add_check_circle_outlined,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppTextField(
+                label: 'Find a task',
+                hint: 'Search by topic, title, or task type',
+                prefixIcon: Icons.search_rounded,
+                onChanged: (value) => setState(() => _query = value),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _TaskFilterMode.values.map((mode) {
+                  return ChoiceChip(
+                    label: Text(_labelForFilter(mode)),
+                    selected: _filterMode == mode,
+                    onSelected: (_) => setState(() => _filterMode = mode),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                filteredCount == 0
+                    ? 'No tasks match the current filter.'
+                    : '$filteredCount task${filteredCount == 1 ? '' : 's'} shown.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (filteredCount == 0)
+          const EmptyStateView(
+            title: 'No matching tasks',
+            message: 'Try another keyword or switch back to a broader task filter.',
+            icon: Icons.filter_alt_off_rounded,
+          )
+        else
+          ...filteredGroups.entries.map(
+            (entry) => Padding(
+              padding: const EdgeInsets.only(bottom: 18),
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: DateUtils.isSameDay(entry.key, DateTime.now())
+                                ? AppTheme.greenSoft
+                                : AppTheme.blueSoft,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            DateUtils.isSameDay(entry.key, DateTime.now())
+                                ? 'Today'
+                                : DateFormat('EEE').format(entry.key),
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: DateUtils.isSameDay(entry.key, DateTime.now())
+                                      ? AppTheme.mint
+                                      : AppTheme.primaryBlue,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            DateFormat('MMMM d').format(entry.key),
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ...entry.value.map(
+                      (task) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: StudyTaskTile(
+                          task: task,
+                          onTap: () => widget.onOpenTaskFocus(task),
+                          onToggle: () => widget.onToggleTask(task.id),
+                          onEdit: () => widget.onEditTask(task),
+                          onDelete: () => widget.onDeleteTask(task.id),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Map<DateTime, List<StudyTask>> _filteredTaskGroups() {
+    final filtered = <DateTime, List<StudyTask>>{};
+    final normalizedQuery = _query.trim().toLowerCase();
+
+    for (final entry in widget.tasksByDate.entries) {
+      final matchingTasks = entry.value.where((task) {
+        final matchesFilter = switch (_filterMode) {
+          _TaskFilterMode.all => true,
+          _TaskFilterMode.today => DateUtils.isSameDay(task.scheduledFor, DateTime.now()),
+          _TaskFilterMode.pending => !task.isCompleted,
+          _TaskFilterMode.completed => task.isCompleted,
+        };
+        if (!matchesFilter) {
+          return false;
+        }
+        if (normalizedQuery.isEmpty) {
+          return true;
+        }
+
+        final searchable = [
+          task.title,
+          task.topicTitle,
+          task.description,
+          task.taskType,
+        ].join(' ').toLowerCase();
+        return searchable.contains(normalizedQuery);
+      }).toList();
+
+      if (matchingTasks.isNotEmpty) {
+        filtered[entry.key] = matchingTasks;
+      }
+    }
+
+    return filtered;
+  }
+
+  String _labelForFilter(_TaskFilterMode mode) {
+    switch (mode) {
+      case _TaskFilterMode.all:
+        return 'All';
+      case _TaskFilterMode.today:
+        return 'Today';
+      case _TaskFilterMode.pending:
+        return 'Pending';
+      case _TaskFilterMode.completed:
+        return 'Completed';
+    }
   }
 }
 

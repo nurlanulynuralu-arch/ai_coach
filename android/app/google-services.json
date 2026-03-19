@@ -12,7 +12,20 @@
           "package_name": "com.example.ai_study_coach"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "219266157640-fdi53k0vsjvouopv44mutm8u5s2lp32g.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.ai_study_coach",
+            "certificate_hash": "9cdd2483f42d84e2655e52ebe39d572c73fa3772"
+          }
+        },
+        {
+          "client_id": "219266157640-4r344afc3arlavielh5rfbgrh22vd9jt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDFhArpcKGW7H47y2j-rivX9hiK9AztZQ4"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "219266157640-4r344afc3arlavielh5rfbgrh22vd9jt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

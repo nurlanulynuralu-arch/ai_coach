@@ -73,7 +73,7 @@ class SectionHeader extends StatelessWidget {
             children: [
               titleBlock,
               const SizedBox(height: 12),
-              actionButton!,
+              actionButton,
             ],
           );
         }
@@ -85,7 +85,7 @@ class SectionHeader extends StatelessWidget {
             if (actionButton != null)
               Padding(
                 padding: const EdgeInsets.only(left: 12),
-                child: actionButton!,
+                child: actionButton,
               ),
           ],
         );

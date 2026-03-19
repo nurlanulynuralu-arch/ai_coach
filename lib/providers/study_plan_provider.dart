@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -13,6 +14,10 @@ import '../models/quiz_attempt.dart';
 import '../models/quiz_question.dart';
 import '../models/study_task.dart';
 import '../models/study_topic.dart';
+import '../models/topic_knowledge.dart';
+import '../models/topic_search_result.dart';
+import '../services/study_material_parser.dart';
+import '../services/study_personalization_service.dart';
 import '../services/study_plan_generator.dart';
 import '../services/topic_knowledge_service.dart';
 
@@ -21,14 +26,17 @@ class StudyPlanProvider extends ChangeNotifier {
     this._repository, {
     StudyPlanGenerator? generator,
     TopicKnowledgeService? knowledgeService,
+    StudyPersonalizationService? personalizationService,
     Uuid? uuid,
   })  : _generator = generator ?? StudyPlanGenerator(),
-        _knowledgeService = knowledgeService ?? TopicKnowledgeService(),
-        _uuid = uuid ?? const Uuid();
+         _knowledgeService = knowledgeService ?? TopicKnowledgeService(),
+         _personalizationService = personalizationService ?? const StudyPersonalizationService(),
+         _uuid = uuid ?? const Uuid();
 
   final StudyRepository _repository;
   final StudyPlanGenerator _generator;
   final TopicKnowledgeService _knowledgeService;
+  final StudyPersonalizationService _personalizationService;
   final Uuid _uuid;
 
   StreamSubscription<List<Exam>>? _examSubscription;
@@ -45,6 +53,9 @@ class StudyPlanProvider extends ChangeNotifier {
   List<StudyTask> _allTasks = <StudyTask>[];
   List<Flashcard> _allFlashcards = <Flashcard>[];
   List<QuizAttempt> _allQuizAttempts = <QuizAttempt>[];
+  final Map<String, List<TopicSearchResult>> _topicSearchResults = <String, List<TopicSearchResult>>{};
+  final Set<String> _loadingTopicSearchKeys = <String>{};
+  final Map<String, String> _topicSearchErrors = <String, String>{};
 
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -82,18 +93,46 @@ class StudyPlanProvider extends ChangeNotifier {
   List<QuizAttempt> attemptsForExam(String examId) =>
       _allQuizAttempts.where((attempt) => attempt.examId == examId).toList();
   List<StudyTask> tasksForTopic(String topicTitle) {
-    final normalizedTopic = topicTitle.trim().toLowerCase();
+    final exam = activeExam;
+    if (exam == null) {
+      return const <StudyTask>[];
+    }
+
+    final normalizedTopic = _normalizedTopicKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
     final filteredTasks = tasks
-        .where((task) => task.topicTitle.trim().toLowerCase() == normalizedTopic)
+        .where(
+          (task) => _normalizedTopicKey(
+            subject: exam.subject,
+            topicTitle: task.topicTitle,
+          ) ==
+              normalizedTopic,
+        )
         .toList();
     filteredTasks.sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
     return filteredTasks;
   }
 
   List<Flashcard> flashcardsForTopic(String topicTitle) {
-    final normalizedTopic = topicTitle.trim().toLowerCase();
+    final exam = activeExam;
+    if (exam == null) {
+      return const <Flashcard>[];
+    }
+
+    final normalizedTopic = _normalizedTopicKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
     final filteredCards = flashcards
-        .where((card) => card.topicTitle.trim().toLowerCase() == normalizedTopic)
+        .where(
+          (card) => _normalizedTopicKey(
+            subject: exam.subject,
+            topicTitle: card.topicTitle,
+          ) ==
+              normalizedTopic,
+        )
         .toList();
     filteredCards.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return filteredCards;
@@ -105,23 +144,138 @@ class StudyPlanProvider extends ChangeNotifier {
       return null;
     }
 
-    final normalizedTopic = topicTitle.trim().toLowerCase();
+    final normalizedTopic = _normalizedTopicKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
     return exam.topics
-        .where((topic) => topic.title.trim().toLowerCase() == normalizedTopic)
+        .where(
+          (topic) => _normalizedTopicKey(
+            subject: exam.subject,
+            topicTitle: topic.title,
+          ) ==
+              normalizedTopic,
+        )
         .firstOrNull;
   }
 
   String? topicSummaryFor(String topicTitle) {
-    final topic = topicForTitle(topicTitle);
     final exam = activeExam;
-    if (topic == null || exam == null) {
+    if (exam == null) {
       return null;
     }
 
-    return _generator.buildTopicCoachNote(
-      exam: exam,
+    final personalizedExam = _personalizedExam(
+      exam,
+      highlightedTopic: topicTitle,
+    );
+    final topic = _topicForExam(
+      personalizedExam,
+      topicTitle,
+    );
+    if (topic == null) {
+      return null;
+    }
+
+    final mistakeCount = _personalizationService.mistakeCountForTopic(
+      subject: personalizedExam.subject,
+      topicTitle: topicTitle,
+      attempts: attemptsForExam(personalizedExam.id),
+    );
+    final intro = _personalizationService.simplificationIntro(
+      topicTitle: StudyMaterialParser.normalizeTopicTitle(
+        subject: personalizedExam.subject,
+        topic: topicTitle,
+      ),
+      mistakeCount: mistakeCount,
+    );
+    final note = _generator.buildTopicCoachNote(
+      exam: personalizedExam,
       topic: topic,
     );
+
+    return intro.isEmpty ? note : '$intro\n\n$note';
+  }
+
+  List<TopicSearchResult> topicSearchResultsFor(String topicTitle) {
+    final exam = activeExam;
+    if (exam == null) {
+      return const <TopicSearchResult>[];
+    }
+
+    final key = _topicSearchCacheKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
+    return List<TopicSearchResult>.unmodifiable(
+      _topicSearchResults[key] ?? const <TopicSearchResult>[],
+    );
+  }
+
+  bool isTopicSearchLoading(String topicTitle) {
+    final exam = activeExam;
+    if (exam == null) {
+      return false;
+    }
+
+    return _loadingTopicSearchKeys.contains(
+      _topicSearchCacheKey(
+        subject: exam.subject,
+        topicTitle: topicTitle,
+      ),
+    );
+  }
+
+  String? topicSearchErrorFor(String topicTitle) {
+    final exam = activeExam;
+    if (exam == null) {
+      return null;
+    }
+
+    return _topicSearchErrors[
+      _topicSearchCacheKey(
+        subject: exam.subject,
+        topicTitle: topicTitle,
+      )
+    ];
+  }
+
+  Future<void> loadTopicSearchResults(
+    String topicTitle, {
+    bool forceRefresh = false,
+  }) async {
+    final exam = activeExam;
+    if (exam == null) {
+      return;
+    }
+
+    final key = _topicSearchCacheKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
+    if (!forceRefresh && _topicSearchResults.containsKey(key) && _topicSearchResults[key]!.isNotEmpty) {
+      return;
+    }
+    if (_loadingTopicSearchKeys.contains(key)) {
+      return;
+    }
+
+    _loadingTopicSearchKeys.add(key);
+    _topicSearchErrors.remove(key);
+    notifyListeners();
+
+    try {
+      final results = await _knowledgeService.searchTopicResults(
+        subject: exam.subject,
+        topic: topicTitle,
+      );
+      _topicSearchResults[key] = results;
+    } catch (_) {
+      _topicSearchErrors[key] = 'Could not load internet results for this topic right now.';
+    } finally {
+      _loadingTopicSearchKeys.remove(key);
+      notifyListeners();
+    }
   }
 
   Map<String, double> get topicCompletionRatios => _topicCompletionRatios();
@@ -147,6 +301,9 @@ class StudyPlanProvider extends ChangeNotifier {
     await _cancelSubscriptions();
     _userId = userId;
     _activeExamId = null;
+    _topicSearchResults.clear();
+    _loadingTopicSearchKeys.clear();
+    _topicSearchErrors.clear();
 
     if (userId == null) {
       reset();
@@ -243,17 +400,43 @@ class StudyPlanProvider extends ChangeNotifier {
       final existingExam = examId == null
           ? null
           : _exams.where((exam) => exam.id == examId).firstOrNull;
+      final normalizedNotes = StudyMaterialParser.normalizeImportedText(notes ?? '');
+      final suggestedTopics = StudyMaterialParser.extractTopics(
+        subject: subject,
+        content: normalizedNotes,
+        maxTopics: topics.isEmpty ? 10 : 6,
+      );
       final normalizedTopics = topics
-          .map((topic) => topic.trim())
+          .map(
+            (topic) => StudyMaterialParser.normalizeTopicTitle(
+              subject: subject,
+              topic: topic.trim(),
+            ),
+          )
           .where((topic) => topic.isNotEmpty)
           .toSet()
           .toList();
+      for (final topic in suggestedTopics) {
+        final normalizedTopic = StudyMaterialParser.normalizeTopicTitle(
+          subject: subject,
+          topic: topic,
+        );
+        if (normalizedTopic.isEmpty) {
+          continue;
+        }
+        final alreadyAdded = normalizedTopics.any(
+          (existingTopic) => existingTopic.toLowerCase() == normalizedTopic.toLowerCase(),
+        );
+        if (!alreadyAdded) {
+          normalizedTopics.add(normalizedTopic);
+        }
+      }
       final normalizedWeakAreas = weakAreas
           .map((item) => item.trim())
           .where((item) => item.isNotEmpty)
           .toSet()
           .toList();
-      final knowledgeByTopic = await _knowledgeService.fetchTopicKnowledge(
+      final knowledgeByTopic = await _loadKnowledgeSafely(
         subject: subject,
         topics: normalizedTopics,
       );
@@ -262,23 +445,31 @@ class StudyPlanProvider extends ChangeNotifier {
         final existingTopic = existingExam?.topics
             .where((topic) => topic.title.toLowerCase() == entry.value.toLowerCase())
             .firstOrNull;
+        final materialSummary = StudyMaterialParser.excerptForTopic(
+          topic: entry.value,
+          content: normalizedNotes,
+        );
         final normalizedTitle = entry.value.toLowerCase();
         final isWeakArea = normalizedWeakAreas.any((item) {
           final normalizedWeakArea = item.toLowerCase();
           return normalizedWeakArea.contains(normalizedTitle) || normalizedTitle.contains(normalizedWeakArea);
         });
-        return (existingTopic ??
+        final baseTopic = existingTopic ??
             StudyTopic(
               id: _uuid.v4(),
               title: entry.value,
               importance: isWeakArea ? 3 : (entry.key < 2 ? 2 : 1),
-            ))
-            .copyWith(
-              importance: isWeakArea ? 3 : (existingTopic?.importance ?? (entry.key < 2 ? 2 : 1)),
-              referenceSummary: knowledge?.summary ?? existingTopic?.referenceSummary,
-              referenceTitle: knowledge?.pageTitle ?? existingTopic?.referenceTitle,
-              referenceUrl: knowledge?.sourceUrl ?? existingTopic?.referenceUrl,
             );
+        return StudyTopic(
+          id: baseTopic.id,
+          title: baseTopic.title,
+          importance: isWeakArea ? 3 : (existingTopic?.importance ?? (entry.key < 2 ? 2 : 1)),
+          referenceSummary: materialSummary ?? knowledge?.summary ?? baseTopic.referenceSummary,
+          referenceTitle: knowledge?.pageTitle ??
+              baseTopic.referenceTitle ??
+              (materialSummary == null ? null : 'Your study materials'),
+          referenceUrl: knowledge?.sourceUrl ?? baseTopic.referenceUrl,
+        );
       }).toList();
 
       final exam = Exam(
@@ -295,7 +486,7 @@ class StudyPlanProvider extends ChangeNotifier {
         weakAreas: normalizedWeakAreas,
         createdAt: existingExam?.createdAt ?? now,
         updatedAt: now,
-        notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
+        notes: normalizedNotes.isEmpty ? null : normalizedNotes,
       );
 
       final content = _generator.buildPlan(exam: exam);
@@ -318,7 +509,12 @@ class StudyPlanProvider extends ChangeNotifier {
       }
       _activeExamId = exam.id;
       return true;
-    } catch (_) {
+    } on FirebaseException catch (error, stackTrace) {
+      debugPrint('saveExamPlan Firebase error [${error.code}]: ${error.message}\n$stackTrace');
+      _errorMessage = _friendlySaveError(error);
+      return false;
+    } catch (error, stackTrace) {
+      debugPrint('saveExamPlan error: $error\n$stackTrace');
       _errorMessage = 'Could not save the exam and study plan. Please try again.';
       return false;
     } finally {
@@ -507,8 +703,26 @@ class StudyPlanProvider extends ChangeNotifier {
     }
 
     if (topics.isNotEmpty) {
+      final normalizedTopics = topics
+          .map(
+            (topic) => StudyMaterialParser.normalizeTopicTitle(
+              subject: subject,
+              topic: topic,
+            ).toLowerCase(),
+          )
+          .where((topic) => topic.isNotEmpty)
+          .toSet();
       final matchingByTopic = _exams
-          .where((exam) => exam.topics.any((topic) => topics.contains(topic.title)))
+          .where(
+            (exam) => exam.topics.any(
+              (topic) => normalizedTopics.contains(
+                StudyMaterialParser.normalizeTopicTitle(
+                  subject: exam.subject,
+                  topic: topic.title,
+                ).toLowerCase(),
+              ),
+            ),
+          )
           .firstOrNull;
       if (matchingByTopic != null) {
         _activeExamId = matchingByTopic.id;
@@ -525,9 +739,18 @@ class StudyPlanProvider extends ChangeNotifier {
       return const <QuizQuestion>[];
     }
 
+    final personalizedExam = _personalizedExam(exam);
     return _generator.buildQuizQuestions(
-      exam: exam,
-      focusTopics: focusTopics,
+      exam: personalizedExam,
+      focusTopics: focusTopics
+          .map(
+            (topic) => StudyMaterialParser.normalizeTopicTitle(
+              subject: personalizedExam.subject,
+              topic: topic,
+            ),
+          )
+          .where((topic) => topic.isNotEmpty)
+          .toList(),
     );
   }
 
@@ -540,9 +763,18 @@ class StudyPlanProvider extends ChangeNotifier {
       return const <QuizQuestion>[];
     }
 
+    final personalizedExam = _personalizedExam(exam);
     return _generator.buildQuizQuestions(
-      exam: exam,
-      focusTopics: focusTopics,
+      exam: personalizedExam,
+      focusTopics: focusTopics
+          .map(
+            (topic) => StudyMaterialParser.normalizeTopicTitle(
+              subject: personalizedExam.subject,
+              topic: topic,
+            ),
+          )
+          .where((topic) => topic.isNotEmpty)
+          .toList(),
     );
   }
 
@@ -551,24 +783,55 @@ class StudyPlanProvider extends ChangeNotifier {
     required int totalQuestions,
     required List<String> weakTopics,
   }) async {
-    if (_userId == null || activeExam == null) {
+    final exam = activeExam;
+    if (_userId == null || exam == null) {
       return;
     }
 
+    final normalizedWeakTopics = weakTopics
+        .map(
+          (topic) => StudyMaterialParser.normalizeTopicTitle(
+            subject: exam.subject,
+            topic: topic,
+          ),
+        )
+        .where((topic) => topic.isNotEmpty)
+        .toSet()
+        .toList();
     final score = totalQuestions == 0 ? 0 : ((correctAnswers / totalQuestions) * 100).round();
     final attempt = QuizAttempt(
       id: _uuid.v4(),
       userId: _userId!,
-      examId: activeExam!.id,
+      examId: exam.id,
       scorePercent: score,
       correctAnswers: correctAnswers,
       totalQuestions: totalQuestions,
-      weakTopics: List<String>.from(weakTopics),
+      weakTopics: List<String>.from(normalizedWeakTopics),
       attemptedAt: DateTime.now(),
     );
 
     try {
       await _repository.saveQuizAttempt(attempt);
+      _allQuizAttempts = <QuizAttempt>[
+        attempt,
+        ..._allQuizAttempts.where((item) => item.id != attempt.id),
+      ];
+      final personalizedExam = _personalizedExam(
+        exam,
+        latestWeakTopics: normalizedWeakTopics,
+      );
+      final updatedExam = exam.copyWith(
+        topics: personalizedExam.topics,
+        weakAreas: personalizedExam.weakAreas,
+        updatedAt: DateTime.now(),
+      );
+      await _repository.updateExam(updatedExam);
+      _replaceExamInMemory(updatedExam);
+      await _scheduleRecoveryTasks(
+        exam: updatedExam,
+        weakTopics: normalizedWeakTopics,
+      );
+      notifyListeners();
     } catch (_) {
       _errorMessage = 'Could not record the quiz attempt.';
       notifyListeners();
@@ -585,6 +848,9 @@ class StudyPlanProvider extends ChangeNotifier {
     _allTasks = <StudyTask>[];
     _allFlashcards = <Flashcard>[];
     _allQuizAttempts = <QuizAttempt>[];
+    _topicSearchResults.clear();
+    _loadingTopicSearchKeys.clear();
+    _topicSearchErrors.clear();
     _activeExamId = null;
     _errorMessage = null;
     _isLoading = false;
@@ -595,13 +861,14 @@ class StudyPlanProvider extends ChangeNotifier {
 
   int get totalStudyMinutes => tasks
       .where((task) => task.isCompleted)
-      .fold<int>(0, (sum, task) => sum + task.estimatedMinutes);
+      .fold<int>(0, (totalMinutes, task) => totalMinutes + task.estimatedMinutes);
 
-  int get todayPlannedMinutes => todayTasks.fold<int>(0, (sum, task) => sum + task.estimatedMinutes);
+  int get todayPlannedMinutes =>
+      todayTasks.fold<int>(0, (totalMinutes, task) => totalMinutes + task.estimatedMinutes);
 
   int get todayCompletedMinutes => todayTasks
       .where((task) => task.isCompleted)
-      .fold<int>(0, (sum, task) => sum + task.estimatedMinutes);
+      .fold<int>(0, (totalMinutes, task) => totalMinutes + task.estimatedMinutes);
 
   Map<DateTime, List<StudyTask>> get tasksByDate {
     final grouped = SplayTreeMap<DateTime, List<StudyTask>>();
@@ -637,12 +904,13 @@ class StudyPlanProvider extends ChangeNotifier {
             final completionDay = _normalize(task.completedAt ?? task.scheduledFor);
             return task.isCompleted && completionDay == day;
           })
-          .fold<int>(0, (sum, task) => sum + task.estimatedMinutes);
+          .fold<int>(0, (totalMinutes, task) => totalMinutes + task.estimatedMinutes);
     });
 
     final averageQuizScore = attempts.isEmpty
         ? 0
-        : (attempts.fold<int>(0, (sum, item) => sum + item.scorePercent) / attempts.length).round();
+        : (attempts.fold<int>(0, (totalScore, item) => totalScore + item.scorePercent) / attempts.length)
+            .round();
 
     return ProgressStats(
       progressPercent: totalTasks == 0 ? 0 : completedTasks / totalTasks,
@@ -657,6 +925,186 @@ class StudyPlanProvider extends ChangeNotifier {
       averageQuizScore: averageQuizScore,
       weeklyMinutes: weeklyMinutes,
     );
+  }
+
+  Exam _personalizedExam(
+    Exam exam, {
+    List<String> latestWeakTopics = const <String>[],
+    String? highlightedTopic,
+  }) {
+    return _personalizationService.personalizeExam(
+      exam: exam,
+      attempts: attemptsForExam(exam.id),
+      latestWeakTopics: latestWeakTopics,
+      highlightedTopic: highlightedTopic,
+    );
+  }
+
+  StudyTopic? _topicForExam(Exam exam, String topicTitle) {
+    final normalizedTopic = _normalizedTopicKey(
+      subject: exam.subject,
+      topicTitle: topicTitle,
+    );
+    return exam.topics
+        .where(
+          (topic) => _normalizedTopicKey(
+            subject: exam.subject,
+            topicTitle: topic.title,
+          ) ==
+              normalizedTopic,
+        )
+        .firstOrNull;
+  }
+
+  String _normalizedTopicKey({
+    required String subject,
+    required String topicTitle,
+  }) {
+    return _personalizationService.normalizedTopicKey(
+      subject: subject,
+      topicTitle: topicTitle,
+    );
+  }
+
+  String _topicSearchCacheKey({
+    required String subject,
+    required String topicTitle,
+  }) {
+    return '${subject.trim().toLowerCase()}::${_normalizedTopicKey(subject: subject, topicTitle: topicTitle)}';
+  }
+
+  Future<Map<String, TopicKnowledge>> _loadKnowledgeSafely({
+    required String subject,
+    required List<String> topics,
+  }) async {
+    try {
+      return await _knowledgeService.fetchTopicKnowledge(
+        subject: subject,
+        topics: topics,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Topic knowledge fallback for $subject: $error\n$stackTrace');
+      return <String, TopicKnowledge>{};
+    }
+  }
+
+  String _friendlySaveError(FirebaseException error) {
+    switch (error.code) {
+      case 'permission-denied':
+        return 'Firestore blocked the save. Make sure you are signed in and that the published rules allow your account to update exams.';
+      case 'unavailable':
+        return 'Could not reach Firebase right now. Check your internet connection and try saving again.';
+      case 'failed-precondition':
+        return 'Firebase still needs one setup step for this save. If it keeps happening, reopen the app and try again.';
+      case 'resource-exhausted':
+      case 'invalid-argument':
+        return 'This exam has too much content to save at once. Shorten the pasted study materials a little and try again.';
+      default:
+        final message = error.message?.trim();
+        if (message != null && message.isNotEmpty) {
+          return message;
+        }
+        return 'Could not save the exam and study plan. Please try again.';
+    }
+  }
+
+  void _replaceExamInMemory(Exam exam) {
+    final index = _exams.indexWhere((item) => item.id == exam.id);
+    if (index == -1) {
+      _exams.add(exam);
+    } else {
+      _exams[index] = exam;
+    }
+  }
+
+  void _upsertTaskInMemory(StudyTask task) {
+    final index = _allTasks.indexWhere((item) => item.id == task.id);
+    if (index == -1) {
+      _allTasks.add(task);
+    } else {
+      _allTasks[index] = task;
+    }
+  }
+
+  Future<void> _scheduleRecoveryTasks({
+    required Exam exam,
+    required List<String> weakTopics,
+  }) async {
+    if (weakTopics.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final today = _normalize(now);
+    var dayOffset = 0;
+
+    for (final weakTopic in weakTopics.take(2)) {
+      final normalizedWeakTopic = _normalizedTopicKey(
+        subject: exam.subject,
+        topicTitle: weakTopic,
+      );
+      if (normalizedWeakTopic.isEmpty) {
+        continue;
+      }
+
+      final hasUpcomingTask = _allTasks.any((task) {
+        if (task.examId != exam.id || task.isCompleted) {
+          return false;
+        }
+        final sameTopic = _normalizedTopicKey(
+              subject: exam.subject,
+              topicTitle: task.topicTitle,
+            ) ==
+            normalizedWeakTopic;
+        final isUpcoming = !_normalize(task.scheduledFor).isBefore(today);
+        final isFocusedTask = task.taskType == 'review' ||
+            task.taskType == 'quiz' ||
+            task.taskType == 'study';
+        return sameTopic && isUpcoming && isFocusedTask;
+      });
+      if (hasUpcomingTask) {
+        continue;
+      }
+
+      final topic = _topicForExam(exam, weakTopic);
+      if (topic == null) {
+        continue;
+      }
+
+      final mistakeCount = _personalizationService.mistakeCountForTopic(
+        subject: exam.subject,
+        topicTitle: weakTopic,
+        attempts: attemptsForExam(exam.id),
+      );
+      final displayTitle = StudyMaterialParser.normalizeTopicTitle(
+        subject: exam.subject,
+        topic: weakTopic,
+      );
+      final scheduledFor = today.add(Duration(days: dayOffset));
+      dayOffset += 1;
+
+      final task = StudyTask(
+        id: _uuid.v4(),
+        userId: exam.userId,
+        examId: exam.id,
+        topicId: topic.id,
+        topicTitle: topic.title,
+        title: 'Recovery review: $displayTitle',
+        description: mistakeCount >= StudyPersonalizationService.repeatedMistakeThreshold
+            ? 'You have repeated mistakes on $displayTitle. Start with the simpler explanation, list 3 key ideas, write the main formula or rule if one exists, and retry one easy quiz question before moving back to exam difficulty.'
+            : 'You missed $displayTitle in the last quiz. Review the topic summary, write the main idea in your own words, and retry one short question to correct the mistake immediately.',
+        taskType: 'review',
+        scheduledFor: scheduledFor,
+        estimatedMinutes:
+            mistakeCount >= StudyPersonalizationService.repeatedMistakeThreshold ? 24 : 18,
+        isCompleted: false,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      await _repository.updateTask(task);
+      _upsertTaskInMemory(task);
+    }
   }
 
   Map<String, double> _topicCompletionRatios() {
@@ -696,10 +1144,22 @@ class StudyPlanProvider extends ChangeNotifier {
 
   Future<StudyTopic> _ensureTopic(String title) async {
     final exam = activeExam!;
-    final trimmed = title.trim();
+    final trimmed = StudyMaterialParser.normalizeTopicTitle(
+      subject: exam.subject,
+      topic: title,
+    );
 
     final existing = exam.topics
-        .where((topic) => topic.title.toLowerCase() == trimmed.toLowerCase())
+        .where(
+          (topic) => _normalizedTopicKey(
+            subject: exam.subject,
+            topicTitle: topic.title,
+          ) ==
+              _normalizedTopicKey(
+                subject: exam.subject,
+                topicTitle: trimmed,
+              ),
+        )
         .firstOrNull;
     if (existing != null) {
       return existing;
