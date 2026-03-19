@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "219266157640",
+    "project_id": "ai-cach",
+    "storage_bucket": "ai-cach.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:219266157640:android:01729278c7ccff121f9c7d",
+        "android_client_info": {
+          "package_name": "com.example.ai_study_coach"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFhArpcKGW7H47y2j-rivX9hiK9AztZQ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,25 @@
+.dart_tool/
+.idea/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.pub/
+.pub-cache/
+build/
+coverage/
+.android-home/
+.gradle-local/
+*.log
+flutter_error_trace.txt
+flutter_run_capture.txt
+flutter_run_capture_after_fix.txt
+
+# IntelliJ-related
+*.iml
+
+# VS Code
+.vscode/
+
+# Android/Flutter local files
+android/local.properties

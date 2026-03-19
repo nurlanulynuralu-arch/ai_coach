@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read, update, delete: if isOwner(userId);
+      allow create: if isOwner(userId) && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /exams/{examId} {
+      allow read, create, update, delete: if isOwner(resource.data.userId) ||
+        (signedIn() && request.resource.data.userId == request.auth.uid);
+    }
+
+    match /study_tasks/{taskId} {
+      allow read, create, update, delete: if isOwner(resource.data.userId) ||
+        (signedIn() && request.resource.data.userId == request.auth.uid);
+    }
+
+    match /flashcards/{flashcardId} {
+      allow read, create, update, delete: if isOwner(resource.data.userId) ||
+        (signedIn() && request.resource.data.userId == request.auth.uid);
+    }
+
+    match /quiz_attempts/{attemptId} {
+      allow read, create, update, delete: if isOwner(resource.data.userId) ||
+        (signedIn() && request.resource.data.userId == request.auth.uid);
+    }
+  }
+}
